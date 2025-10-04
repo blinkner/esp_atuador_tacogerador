@@ -110,8 +110,8 @@ void wifi_connection() {
     esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL);
     wifi_config_t wifi_configuration = {
         .sta = {
-            .ssid = "Blinkner-Lan",
-            .password = "blinkner11",
+            .ssid = "WIFI_SSID",
+            .password = "WIFI_PASSWORD",
         }
     };
     esp_wifi_set_mode(WIFI_MODE_STA);
@@ -169,7 +169,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 // Função para inicializar MQTT
 static void mqtt_app_start(void) {
     esp_mqtt_client_config_t mqtt_cfg = {
-        .broker.address.uri = "mqtt://10.183.79.252:1883/mqtt",
+        .broker.address.uri = "mqtt://IP:1883/mqtt",
         .credentials.client_id	= "ESP32",
     };
     client = esp_mqtt_client_init(&mqtt_cfg);
