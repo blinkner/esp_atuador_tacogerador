@@ -1,6 +1,8 @@
 const yChart = document.getElementById('y-chart');
 const uChart = document.getElementById('u-chart');
 
+let dados = "TIME\tADC_BITS\tVOLTAGE\tCONTROL_SIGNAL\n";
+
 Ygraph = new Chart(yChart, {
     type: 'line',
     data: {
@@ -14,6 +16,14 @@ Ygraph = new Chart(yChart, {
             tension: 0.1,
             pointStyle: false
         }]
+    },
+    options: {
+        scales: {
+            y: {
+                min: 0,
+                max: 3100
+            }
+        }
     }
 });
 Ugraph = new Chart(uChart, {
@@ -29,6 +39,14 @@ Ugraph = new Chart(uChart, {
             tension: 0.1,
             pointStyle: false
         }]
+    },
+    options: {
+        scales: {
+            y: {
+                min: 0,
+                max: 100
+            }
+        }
     }
 });
 
@@ -63,4 +81,10 @@ client.on('message', (topic, message) => {
     let obj = JSON.parse(message)
     addData(Ygraph, obj.time, obj.voltage);
     addData(Ugraph, obj.time, obj.control_signal);
+    dados += obj.time + "\t" + obj.adc_bits + "\t" + obj.voltage + "\t" + obj.control_signal + "\n";
 });
+
+function SalvarArquivo() {
+    const blob = new Blob([dados], {type: "text/plain; charset=utf-8"});
+    saveAs(blob, "dados.txt");
+}

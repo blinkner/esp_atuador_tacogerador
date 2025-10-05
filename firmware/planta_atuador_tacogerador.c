@@ -1,3 +1,6 @@
+// Planta Atuador Tacogerador
+// Desenvolvida por: Gabriel Marlon
+
 #include <stdio.h> // Para comandos básicos como printf
 #include <string.h> // Para manipulação de strings
 #include "freertos/FreeRTOS.h" // Para operações do FreeRTOS como delays
@@ -169,7 +172,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 // Função para inicializar MQTT
 static void mqtt_app_start(void) {
     esp_mqtt_client_config_t mqtt_cfg = {
-        .broker.address.uri = "mqtt://IP:1883/mqtt",
+        .broker.address.uri = "mqtt://BROKER_IP:1883/mqtt",
         .credentials.client_id	= "ESP32",
     };
     client = esp_mqtt_client_init(&mqtt_cfg);
@@ -248,7 +251,7 @@ void app_main(void) {
     pwm_config(); // Configura o PWM para o motor
     adc_config(); // Configura o ADC para o tacogerador
 
-    snprintf(duty_cycle, sizeof(duty_cycle), "%d", 50);
+    snprintf(duty_cycle, sizeof(duty_cycle), "%d", 40);
 
     while (1) {
         adc_oneshot_read(handle, ADC_CHANNEL, &adc_voltage); // Leitura do ADC (Tacogerador)
@@ -256,10 +259,10 @@ void app_main(void) {
         u = atof(duty_cycle);  // Converte o duty_cycle de string para float
         
         // Configura a faixa de atuação do PWM
-        if (u < 0) {
+        if (u < 20) {
             u = 0;
-        } else if (u > 100) {
-            u = 100;
+        } else if (u > 60) {
+            u = 60;
         } else {
             u = u;
         }
@@ -270,6 +273,6 @@ void app_main(void) {
 
         enviar_dados(u); // Comunicação com a IHM
 
-        vTaskDelay(250 / portTICK_PERIOD_MS); // Delay de 1 segundo
+        vTaskDelay(250 / portTICK_PERIOD_MS); // Delay de 250 ms
     }
 }

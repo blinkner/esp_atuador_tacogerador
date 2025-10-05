@@ -6,6 +6,7 @@
     <title>MQTT Dashboard</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.0/FileSaver.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
@@ -17,6 +18,7 @@
         <label for="duty">Duty Cycle:</label>
         <input type="number" name="duty" id="duty" min="0" max="100" value="50">
         <input type="button" id="btn-duty" value="Enviar">
+        <button type="button" onclick="SalvarArquivo()">Salvar Dados</button>
     </div>
 
     <div class="graphs">

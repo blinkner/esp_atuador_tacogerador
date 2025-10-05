@@ -13,12 +13,12 @@ body {
 .graphs div {
     flex: 1 0 400px;
 }
-.control input {
+.control input, .control button {
     padding: 10px;
     border: 1px solid black;
     border-radius: 10px;
 }
-.control input[type=button]:hover {
+.control input[type=button]:hover, .control button[type=button]:hover {
     background-color: black;
     color: white;
 }
