@@ -20,8 +20,8 @@ Ygraph = new Chart(yChart, {
     options: {
         scales: {
             y: {
-                min: 0,
-                max: 3100
+                suggestedMin: 0,
+                suggestedMax: 3100
             }
         }
     }
@@ -43,8 +43,8 @@ Ugraph = new Chart(uChart, {
     options: {
         scales: {
             y: {
-                min: 0,
-                max: 100
+                suggestedMin: 0,
+                suggestedMax: 100
             }
         }
     }

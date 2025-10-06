@@ -180,7 +180,7 @@ static void mqtt_app_start(void) {
     esp_mqtt_client_start(client);
 }
 
-//Função para configurar o PWM
+// Função para configurar o PWM
 static void pwm_config(void) {
     ledc_timer_config_t timer = {
         .speed_mode = LEDC_LOW_SPEED_MODE,
@@ -251,7 +251,7 @@ void app_main(void) {
     pwm_config(); // Configura o PWM para o motor
     adc_config(); // Configura o ADC para o tacogerador
 
-    snprintf(duty_cycle, sizeof(duty_cycle), "%d", 40);
+    snprintf(duty_cycle, sizeof(duty_cycle), "%d", 45);
 
     while (1) {
         adc_oneshot_read(handle, ADC_CHANNEL, &adc_voltage); // Leitura do ADC (Tacogerador)
@@ -259,10 +259,10 @@ void app_main(void) {
         u = atof(duty_cycle);  // Converte o duty_cycle de string para float
         
         // Configura a faixa de atuação do PWM
-        if (u < 20) {
+        if (u < 45) {
             u = 0;
-        } else if (u > 60) {
-            u = 60;
+        } else if (u > 100) {
+            u = 100;
         } else {
             u = u;
         }
