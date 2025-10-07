@@ -273,6 +273,6 @@ void app_main(void) {
 
         enviar_dados(u); // Comunicação com a IHM
 
-        vTaskDelay(250 / portTICK_PERIOD_MS); // Delay de 250 ms
+        vTaskDelay(50 / portTICK_PERIOD_MS); // Delay de 50 ms
     }
 }

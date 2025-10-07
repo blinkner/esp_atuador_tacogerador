@@ -79,9 +79,12 @@ client.on('message', (topic, message) => {
     // document.getElementById('data').textContent = message.toString();
 
     let obj = JSON.parse(message)
-    addData(Ygraph, obj.time, obj.voltage);
-    addData(Ugraph, obj.time, obj.control_signal);
-    dados += obj.time + "\t" + obj.adc_bits + "\t" + obj.voltage + "\t" + obj.control_signal + "\n";
+
+    if (obj.control_signal > 0) {
+        addData(Ygraph, obj.time, obj.voltage);
+        addData(Ugraph, obj.time, obj.control_signal);
+        dados += obj.time + "\t" + obj.adc_bits + "\t" + obj.voltage + "\t" + obj.control_signal + "\n";
+    }
 });
 
 function SalvarArquivo() {
