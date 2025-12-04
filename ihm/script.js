@@ -1,7 +1,7 @@
 const yChart = document.getElementById('y-chart');
 const uChart = document.getElementById('u-chart');
 
-let dados = "TIME\tADC_BITS\tVOLTAGE\tCONTROL_SIGNAL\n";
+let dados = "TIME\tVOLTAGE\tCONTROL_SIGNAL\n";
 
 Ygraph = new Chart(yChart, {
     type: 'line',
@@ -55,7 +55,14 @@ function addData(chart, label, newData) {
     chart.data.datasets.forEach((dataset) => {
         dataset.data.push(newData);
     });
-    chart.update();
+    chart.update('none');
+}
+function removeData(chart) {
+    chart.data.labels.splice(0, 100);
+    chart.data.datasets.forEach((dataset) => {
+        dataset.data.splice(0, 100);
+    });
+    chart.update('none');
 }
 
 const btn_duty = document.getElementById('btn-duty');
@@ -75,16 +82,24 @@ client.on('connect', () => {
     });
 });
 client.on('message', (topic, message) => {
-    console.log('Received message: ' + message.toString() + ' on topic: ' + topic);
+    // console.log('Received message: ' + message.toString() + ' on topic: ' + topic);
     // document.getElementById('data').textContent = message.toString();
 
-    let obj = JSON.parse(message)
+    message = "[" + message + "]";
+    message = message.replace(",]", "]")
+    obj = JSON.parse(message);
 
-    if (obj.control_signal > 0) {
-        addData(Ygraph, obj.time, obj.voltage);
-        addData(Ugraph, obj.time, obj.control_signal);
-        dados += obj.time + "\t" + obj.adc_bits + "\t" + obj.voltage + "\t" + obj.control_signal + "\n";
-    }
+    if (Ygraph.data.labels.length > 500) {
+        removeData(Ygraph);
+        removeData(Ugraph);
+    } 
+    obj.forEach(item => {
+        if (item.u != 0) {
+            addData(Ygraph, item.t, item.y);
+            addData(Ugraph, item.t, item.u);
+            dados += item.t + "\t" + "\t" + item.y + "\t" + item.u + "\n";
+        }
+    });
 });
 
 function SalvarArquivo() {

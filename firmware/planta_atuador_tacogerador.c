@@ -21,8 +21,13 @@
 
 // Informações de wifi
 int wifi_retry_count = 0; // Contador de tentativas para se conectar ao wi-fi
-float u = 0.0; // Sinal de controle
+int u = 0; // Sinal de controle
 int adc_voltage = 0; // Variável para armazenar o valor lido do tacogerador
+int t_timer = 0; // Contador de tempo
+char buffer1[5000];
+char buffer2[5000];
+int contador = 0;
+bool muda_buffer = false;
 
 #define WIFI_RETRY_NUM 5 // Número de tentativas para se conectar ao wi-fi
 #define LEDC_GPIO 4 // GPIO de saída do PWM
@@ -30,6 +35,7 @@ int adc_voltage = 0; // Variável para armazenar o valor lido do tacogerador
 #define LEDC_FREQ 1000 // Frequência de chaveamento do motor
 #define ADC_UNIT ADC_UNIT_1 // Unidade do ADC
 #define ADC_CHANNEL ADC_CHANNEL_5 // Canal do ADC
+#define T_AMOSTRAGEM 10 // Tempo de amostragem (em ms)
 
 esp_mqtt_client_handle_t client = NULL;
 adc_oneshot_unit_handle_t handle = NULL;
@@ -43,35 +49,6 @@ static void log_error_if_nonzero(const char *message, int error_code) {
     if (error_code != 0) {
         ESP_LOGE(TAG, "Last error %s: 0x%x", message, error_code);
     }
-}
-
-// Inicializa o SNTP
-void initialize_sntp(void) {
-    ESP_LOGI("SNTP", "Inicializando SNTP");
-    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL); // Define o modo de operação
-    esp_sntp_setservername(0, "pool.ntp.org"); // Configura o servidor NTP
-    esp_sntp_init(); // Inicializa o cliente SNTP
-
-    time_t now = 0;
-    struct tm timeinfo = { 0 };
-    for (int retry = 0; retry < 10; retry++) {
-        ESP_LOGI("SNTP", "Aguardando sincronização... (%d/10)", retry + 1);
-        vTaskDelay(2000 / portTICK_PERIOD_MS);
-        time(&now);
-        localtime_r(&now, &timeinfo);
-        if (timeinfo.tm_year > (2023 - 1900)) {
-            ESP_LOGI("SNTP", "Horário sincronizado: %s", asctime(&timeinfo));
-            return;
-        }
-    }
-    ESP_LOGE("SNTP", "Falha ao sincronizar o horário");
-}
-
-// Define o Timezone
-void set_timezone(void) {
-    setenv("TZ", "<-03>3", 1); // Configura UTC-3 sem horário de verão
-    tzset();
-    ESP_LOGI("TIMEZONE", "Fuso horário configurado para UTC-3");
 }
 
 // Função Wifi Handler
@@ -222,41 +199,59 @@ static void adc_config(void) {
 }
 
 // Converte a saída do ADC para tensão
-float converte_tensao_adc(int Dout, int Vmax, int Dmax) {
+int converte_tensao_adc(int Dout, int Vmax, int Dmax) {
     return (Dout * Vmax / Dmax);
 }
-void enviar_dados(int u) {
-    // Obtém o horário atual
-    time_t now;
-    struct tm timeinfo;
-    time(&now);
-    localtime_r(&now, &timeinfo);
 
-    // Formata a mensagem JSON
-    char json_message[128];
-    snprintf(json_message, sizeof(json_message), 
-        "{\"time\": %lld, \"adc_bits\": %d, \"voltage\": %f, \"control_signal\": %d}",
-        now, ADC_BITWIDTH_12, converte_tensao_adc(adc_voltage, 3100, 4095), u);
+// Função para comunicação com a IHM
+void enviar_dados() {
+    while(1) {
+        t_timer += T_AMOSTRAGEM;
 
-    // Faz o envio dos dados por MQTT
-    esp_mqtt_client_publish(client, "planta/tacogerador/voltage", json_message, 0, 1, 0);
+        // Formata a mensagem JSON
+        char json_message[128];
+        snprintf(json_message, sizeof(json_message), 
+            "{\"t\":%d,\"y\":%d,\"u\":%d},",
+            t_timer, converte_tensao_adc(adc_voltage, 3100, 4095), u);
+        
+        if (contador >= 100) {
+            if (!muda_buffer) {
+                esp_mqtt_client_publish(client, "planta/tacogerador/voltage", buffer1, 0, 2, 0); // Faz o envio dos dados por MQTT
+                memset(buffer1, 0, sizeof(buffer1));
+            } else {
+                esp_mqtt_client_publish(client, "planta/tacogerador/voltage", buffer2, 0, 2, 0); // Faz o envio dos dados por MQTT
+                memset(buffer2, 0, sizeof(buffer2));
+            }
+            muda_buffer = !muda_buffer;
+            contador = 0;
+        }
+        if (!muda_buffer) {
+            strcat(buffer1, json_message);
+        } else {
+            strcat(buffer2, json_message);
+        }
+        contador++;
+        
+        vTaskDelay(T_AMOSTRAGEM / portTICK_PERIOD_MS); // Delay de T ms
+    }
 }
 
 void app_main(void) {
     nvs_flash_init();
     wifi_connection(); // Configura o wifi
-    initialize_sntp();
-    set_timezone();
     mqtt_app_start(); // Configura o MQTT
     pwm_config(); // Configura o PWM para o motor
     adc_config(); // Configura o ADC para o tacogerador
 
-    snprintf(duty_cycle, sizeof(duty_cycle), "%d", 45);
+    // Repassando a tarefa de comunicação com a IHM para o outro núcleo
+    xTaskCreatePinnedToCore(enviar_dados, "communication", 2048, NULL, 1, NULL, PRO_CPU_NUM);
+
+    snprintf(duty_cycle, sizeof(duty_cycle), "%d", 50); // Inicializa o duty cycle com 50%
 
     while (1) {
         adc_oneshot_read(handle, ADC_CHANNEL, &adc_voltage); // Leitura do ADC (Tacogerador)
 
-        u = atof(duty_cycle);  // Converte o duty_cycle de string para float
+        u = atoi(duty_cycle);  // Converte o duty_cycle de string para int
         
         // Configura a faixa de atuação do PWM
         if (u < 45) {
@@ -268,11 +263,9 @@ void app_main(void) {
         }
 
         // Gera o PWM no GPIO
-        ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, u/100 * 1024.0);
+        ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, atof(duty_cycle)/100 * 1024.0);
         ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
 
-        enviar_dados(u); // Comunicação com a IHM
-
-        vTaskDelay(50 / portTICK_PERIOD_MS); // Delay de 50 ms
+        vTaskDelay(20 / portTICK_PERIOD_MS); // Delay de 20 ms
     }
 }
