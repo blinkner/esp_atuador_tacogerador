@@ -3,21 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MQTT Dashboard</title>
+    <title>Controle da Planta Motor-Tacogerador</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.0/FileSaver.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
-    <h1>MQTT Dashboard</h1>
-    <!-- <p>Dados recebidos:</p>
-    <div id="data">Esperando por dados...</div> -->
+    <h1>Controle da Planta Motor-Tacogerador</h1>
 
     <div class="control">
-        <label for="duty">Duty Cycle:</label>
-        <input type="number" name="duty" id="duty" min="0" max="100" value="50">
-        <input type="button" id="btn-duty" value="Enviar">
+        <label for="referencia">Referência (em mV):</label>
+        <input type="number" name="referencia" id="referencia" min="0" max="3100" value="1550">
+        <input type="button" id="btn-referencia" value="Enviar">
         <button type="button" onclick="SalvarArquivo()">Salvar Dados</button>
     </div>
 

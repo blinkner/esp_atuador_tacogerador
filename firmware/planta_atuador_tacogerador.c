@@ -1,5 +1,5 @@
-// Planta Atuador Tacogerador
-// Desenvolvida por: Gabriel Marlon
+// Planta Motor-Tacogerador
+// Desenvolvido por: Gabriel Marlon
 
 #include <stdio.h> // Para comandos básicos como printf
 #include <string.h> // Para manipulação de strings
@@ -14,24 +14,26 @@
 #include "mqtt_client.h" // Funções relacionadas ao cliente MQTT
 #include "esp_sntp.h" // Para sincronizar o horário do dispositivo usando SNTP
 #include <time.h> // Biblioteca padrão para trabalhar com tempo
-#include "cJSON.h" // Biblioteca para montar JSON dinamicamente
 #include "driver/ledc.h" // Biblioteca para gerar PWM
 #include "hal/adc_types.h"
 #include "esp_adc/adc_oneshot.h"
 
-// Informações de wifi
 int wifi_retry_count = 0; // Contador de tentativas para se conectar ao wi-fi
-int u = 0; // Sinal de controle
-int adc_voltage = 0; // Variável para armazenar o valor lido do tacogerador
-int t_timer = 0; // Contador de tempo
 char buffer1[5000];
 char buffer2[5000];
 int contador = 0;
+float e[] = {0, 0}; // Erro
+float uc[] = {0, 0}; // Sinal que sai do controlador
+static float u0 = 45.0;
 bool muda_buffer = false;
+static int adc_voltage = 0; // Variável para armazenar o valor lido do tacogerador
+static int t_timer = 0; // Contador de tempo
+static float u = 0; // Sinal que entra na planta
+static char r[10] = {0}; // Referência
 
 #define WIFI_RETRY_NUM 5 // Número de tentativas para se conectar ao wi-fi
 #define LEDC_GPIO 4 // GPIO de saída do PWM
-#define LEDC_RESOLUTION 1024 // Resolução do PWM
+#define LEDC_RESOLUTION 8191 // Resolução do PWM
 #define LEDC_FREQ 1000 // Frequência de chaveamento do motor
 #define ADC_UNIT ADC_UNIT_1 // Unidade do ADC
 #define ADC_CHANNEL ADC_CHANNEL_5 // Canal do ADC
@@ -43,7 +45,6 @@ ledc_channel_config_t channel_LEDC;
 ledc_timer_config_t timer;
 
 static const char *TAG = "MQTT_MOTOR_TACOGERADOR";
-static char duty_cycle[10] = {0};
 
 static void log_error_if_nonzero(const char *message, int error_code) {
     if (error_code != 0) {
@@ -109,7 +110,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     switch (event->event_id) {
         case MQTT_EVENT_CONNECTED:
             ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
-            esp_mqtt_client_subscribe(client, "planta/motor/pwm", 0);
+            esp_mqtt_client_subscribe(client, "planta/tacogerador/referencia", 0);
             break;
         case MQTT_EVENT_DISCONNECTED:
             ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
@@ -128,8 +129,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             printf("\nTÓPICO = %.*s\r\n", event->topic_len, event->topic);
             printf("DADO = %.*s\r\n", event->data_len, event->data);
 
-            memset(duty_cycle, 0, sizeof(duty_cycle));
-            snprintf(duty_cycle, sizeof(duty_cycle), "%.*s", event->data_len, event->data);
+            memset(r, 0, sizeof(r));
+            snprintf(r, sizeof(r), "%.*s", event->data_len, event->data);
             break;
         case MQTT_EVENT_ERROR:
             ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
@@ -150,7 +151,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 static void mqtt_app_start(void) {
     esp_mqtt_client_config_t mqtt_cfg = {
         .broker.address.uri = "mqtt://BROKER_IP:1883/mqtt",
-        .credentials.client_id	= "ESP32",
+        .credentials.client_id	= "ESP32-Planta-de-Controle",
     };
     client = esp_mqtt_client_init(&mqtt_cfg);
     esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, client);
@@ -161,7 +162,7 @@ static void mqtt_app_start(void) {
 static void pwm_config(void) {
     ledc_timer_config_t timer = {
         .speed_mode = LEDC_LOW_SPEED_MODE,
-        .duty_resolution = LEDC_TIMER_10_BIT,
+        .duty_resolution = LEDC_TIMER_13_BIT,
         .timer_num = LEDC_TIMER_0,
         .freq_hz = LEDC_FREQ,
         .clk_cfg = LEDC_AUTO_CLK
@@ -211,20 +212,23 @@ void enviar_dados() {
         // Formata a mensagem JSON
         char json_message[128];
         snprintf(json_message, sizeof(json_message), 
-            "{\"t\":%d,\"y\":%d,\"u\":%d},",
-            t_timer, converte_tensao_adc(adc_voltage, 3100, 4095), u);
+            "{\"t\":%d,\"y\":%d,\"u\":%.2f,\"e\":%2f},",
+            t_timer, converte_tensao_adc(adc_voltage, 3100, 4095), u, e[1]);
         
-        if (contador >= 100) {
+        // Verifica se o buffer encheu, envia os dados e intercala com o outro buffer
+        if (contador >= 50) {
             if (!muda_buffer) {
-                esp_mqtt_client_publish(client, "planta/tacogerador/voltage", buffer1, 0, 2, 0); // Faz o envio dos dados por MQTT
+                esp_mqtt_client_publish(client, "planta/tacogerador/voltage", buffer1, 0, 1, 0); // Faz o envio do buffer1 por MQTT
                 memset(buffer1, 0, sizeof(buffer1));
             } else {
-                esp_mqtt_client_publish(client, "planta/tacogerador/voltage", buffer2, 0, 2, 0); // Faz o envio dos dados por MQTT
+                esp_mqtt_client_publish(client, "planta/tacogerador/voltage", buffer2, 0, 1, 0); // Faz o envio do buffer2 por MQTT
                 memset(buffer2, 0, sizeof(buffer2));
             }
             muda_buffer = !muda_buffer;
             contador = 0;
         }
+
+        // Preenche os buffers
         if (!muda_buffer) {
             strcat(buffer1, json_message);
         } else {
@@ -243,15 +247,28 @@ void app_main(void) {
     pwm_config(); // Configura o PWM para o motor
     adc_config(); // Configura o ADC para o tacogerador
 
+    snprintf(r, sizeof(r), "%d", 1550); // Inicializa a referência com 1550 mV
+
+    // Gera o PWM no GPIO
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, (float) (u0/100) * 8191.0);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+    
     // Repassando a tarefa de comunicação com a IHM para o outro núcleo
     xTaskCreatePinnedToCore(enviar_dados, "communication", 2048, NULL, 1, NULL, PRO_CPU_NUM);
-
-    snprintf(duty_cycle, sizeof(duty_cycle), "%d", 50); // Inicializa o duty cycle com 50%
 
     while (1) {
         adc_oneshot_read(handle, ADC_CHANNEL, &adc_voltage); // Leitura do ADC (Tacogerador)
 
-        u = atoi(duty_cycle);  // Converte o duty_cycle de string para int
+        e[0] = e[1];
+        uc[0] = uc[1];
+
+        e[1] = atoi(r) - converte_tensao_adc(adc_voltage, 3100, 4095); // Cálculo do erro
+
+        uc[1] = uc[0] - 0.5833 * (1 - 2.0449) * e[1] - 0.5833 * e[0]; // Controlador Síntese Direta
+        // uc[1] = uc[0] + 0.6095 * e[1] + (0.0262 - 0.6095) * e[0]; // Controlador Modelo Interno
+        // uc[1] = uc[0] + 2 * e[1] - 1.322 * e[0]; // Controlador LGR (Pelo Modelo ARX)
+
+        u = u0 + uc[1]; // Sinal de controle
         
         // Configura a faixa de atuação do PWM
         if (u < 45) {
@@ -263,9 +280,9 @@ void app_main(void) {
         }
 
         // Gera o PWM no GPIO
-        ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, atof(duty_cycle)/100 * 1024.0);
+        ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, (float) u/100 * 8191.0);
         ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
 
-        vTaskDelay(20 / portTICK_PERIOD_MS); // Delay de 20 ms
+        vTaskDelay(10 / portTICK_PERIOD_MS); // Delay de 10 ms
     }
 }

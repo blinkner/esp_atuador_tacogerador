@@ -1,7 +1,7 @@
 const yChart = document.getElementById('y-chart');
 const uChart = document.getElementById('u-chart');
 
-let dados = "TIME\tVOLTAGE\tCONTROL_SIGNAL\n";
+let dados = "TIME;VOLTAGE;CONTROL_SIGNAL;ERRO\n";
 
 Ygraph = new Chart(yChart, {
     type: 'line',
@@ -58,17 +58,17 @@ function addData(chart, label, newData) {
     chart.update('none');
 }
 function removeData(chart) {
-    chart.data.labels.splice(0, 100);
+    chart.data.labels.splice(0, 50);
     chart.data.datasets.forEach((dataset) => {
-        dataset.data.splice(0, 100);
+        dataset.data.splice(0, 50);
     });
     chart.update('none');
 }
 
-const btn_duty = document.getElementById('btn-duty');
-btn_duty.addEventListener('click', () => {
-    let duty_value = document.getElementById('duty').value;
-    client.publish('planta/motor/pwm', duty_value);
+const btn_referencia = document.getElementById('btn-referencia');
+btn_referencia.addEventListener('click', () => {
+    let referencia_value = document.getElementById('referencia').value;
+    client.publish('planta/tacogerador/referencia', referencia_value);
 });
 
 const client = mqtt.connect('ws://localhost:9001');
@@ -77,7 +77,7 @@ client.on('connect', () => {
     const topic = 'planta/tacogerador/voltage';
     client.subscribe(topic, (err) => {
         if (!err) {
-            console.log('Subscribed to topic: ' + topic);
+            console.log('Inscrito no tópico: ' + topic);
         }
     });
 });
@@ -89,7 +89,7 @@ client.on('message', (topic, message) => {
     message = message.replace(",]", "]")
     obj = JSON.parse(message);
 
-    if (Ygraph.data.labels.length > 500) {
+    if (Ygraph.data.labels.length >= 500) {
         removeData(Ygraph);
         removeData(Ugraph);
     } 
@@ -97,7 +97,7 @@ client.on('message', (topic, message) => {
         if (item.u != 0) {
             addData(Ygraph, item.t, item.y);
             addData(Ugraph, item.t, item.u);
-            dados += item.t + "\t" + "\t" + item.y + "\t" + item.u + "\n";
+            dados += item.t + ";" + item.y + ";" + item.u + ";" + item.e + "\n";
         }
     });
 });
