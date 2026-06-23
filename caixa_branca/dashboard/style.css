@@ -1,0 +1,33 @@
+body {
+    font-family: Arial, sans-serif;
+    text-align: center;
+    background: radial-gradient(circle, rgb(60, 60, 63) 0%, rgb(28, 28, 30) 100%);
+    color: #EEEEEE;
+}
+main {
+    display: flex;
+    flex-direction: column;
+}
+.graphs {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 10px;
+}
+.graphs div {
+    flex: 1 1 300px;
+    height: 150px;
+    width: 80vw;
+}
+.control input, .control button {
+    padding: 10px;
+    border: 2px solid rgb(60, 60, 63);
+    border-radius: 10px;
+}
+.control input[type=button]:hover, .control button[type=button]:hover {
+    background-color: rgb(60, 60, 63);
+    border: 2px solid #EEEEEE;
+    color: white;
+    cursor: pointer;
+}

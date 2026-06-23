@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Controle da Planta Motor-Tacogerador</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.0/FileSaver.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/scichart@5.2.35/index.min.js"></script>
+</head>
+<body>
+    <header>
+        <h1>Controle da Planta Motor-Tacogerador</h1>
+    </header>
+
+    <main>
+        <div class="control">
+            <label for="referencia">Referência (mV):</label>
+            <input type="number" name="referencia" id="referencia" min="0" max="3100" value="1550">
+            <input type="button" id="btn-referencia" value="Enviar">
+            <button type="button" id="salvar-dados">Salvar Dados</button>
+        </div>
+    
+        <div class="graphs">
+            <div id="y-chart"></div>
+            <div id="u-chart"></div>
+        </div>
+    </main>
+
+    <script type="module" src="script.js"></script>
+</body>
+</html>
+
+<!-- https://docs.oasis-open.org/mqtt/mqtt/v5.0/mqtt-v5.0.html -->
+
+<!-- python -m http.server 8000
+http://localhost:8000 -->

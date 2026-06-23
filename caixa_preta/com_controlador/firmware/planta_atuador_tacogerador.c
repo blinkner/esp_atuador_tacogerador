@@ -2,49 +2,71 @@
 // Desenvolvido por: Gabriel Marlon
 
 #include <stdio.h> // Para comandos básicos como printf
+#include <driver/ledc.h> // Biblioteca para gerar PWM
+#include <esp_err.h>
+#include <driver/gpio.h>
+#include <freertos/FreeRTOS.h> // Para operações do FreeRTOS como delays
+#include <freertos/task.h>
+#include <esp_log.h> // Para exibição de logs
+#include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
+
 #include <string.h> // Para manipulação de strings
-#include "freertos/FreeRTOS.h" // Para operações do FreeRTOS como delays
+#include <math.h>
 #include "esp_system.h" // FUnções de inicialização do sistema
 #include "esp_wifi.h" // Funções de inicialização e operações de Wi-Fi
-#include "esp_log.h" // Para exibição de logs
 #include "esp_event.h" // Para manipulação de eventos, incluindo eventos de Wi-Fi
 #include "nvs_flash.h" // Para armazenamento não volátil (NVS)
 #include "lwip/err.h" // Para tratamento de erros do stack TCP/IP leve (LwIP)
 #include "lwip/sys.h" // Aplicações do sistema para LwIP
 #include "mqtt_client.h" // Funções relacionadas ao cliente MQTT
-#include "esp_sntp.h" // Para sincronizar o horário do dispositivo usando SNTP
-#include <time.h> // Biblioteca padrão para trabalhar com tempo
-#include "driver/ledc.h" // Biblioteca para gerar PWM
 #include "hal/adc_types.h"
 #include "esp_adc/adc_oneshot.h"
+#include "my_data.h"
 
-int wifi_retry_count = 0; // Contador de tentativas para se conectar ao wi-fi
-char buffer1[5000];
-char buffer2[5000];
-int contador = 0;
-float e[] = {0, 0}; // Erro
-float uc[] = {0, 0}; // Sinal que sai do controlador
-static float u0 = 45.0;
-bool muda_buffer = false;
-static int adc_voltage = 0; // Variável para armazenar o valor lido do tacogerador
-static int t_timer = 0; // Contador de tempo
-static float u = 0; // Sinal que entra na planta
-static char r[10] = {0}; // Referência
+// Constantes LEDS
+#define LEDC_TIMER LEDC_TIMER_0
+#define LEDC_MODE LEDC_LOW_SPEED_MODE
+#define LEDC_OUTPUT_IO 4 // GPIO de saída do PWM
+#define LEDC_CHANNEL LEDC_CHANNEL_0
+#define LEDC_DUTY_RES LEDC_TIMER_13_BIT // Resolução do PWM
+#define LEDC_FREQUENCY 1000 // Frequência de chaveamento do motor
 
-#define WIFI_RETRY_NUM 5 // Número de tentativas para se conectar ao wi-fi
-#define LEDC_GPIO 4 // GPIO de saída do PWM
-#define LEDC_RESOLUTION 8191 // Resolução do PWM
-#define LEDC_FREQ 1000 // Frequência de chaveamento do motor
+// Constantes ADC
 #define ADC_UNIT ADC_UNIT_1 // Unidade do ADC
 #define ADC_CHANNEL ADC_CHANNEL_5 // Canal do ADC
+#define ADC_ATTEN ADC_ATTEN_DB_12 // Atenuação do ADC
+
+// Outras constantes
+#define WIFI_RETRY_NUM 5 // Número de tentativas para se conectar ao wi-fi
 #define T_AMOSTRAGEM 10 // Tempo de amostragem (em ms)
+#define ZONA_MORTA 44 // Zona morta do motor (em %)
 
-esp_mqtt_client_handle_t client = NULL;
-adc_oneshot_unit_handle_t handle = NULL;
-ledc_channel_config_t channel_LEDC;
-ledc_timer_config_t timer;
+// Variáveis
+int wifi_retry_count = 0; // Contador de tentativas para se conectar ao wi-fi
+int buffer_count = 0;
+float e[] = {0, 0}; // Erro
+float uc[] = {0, 0}; // Sinal que sai do controlador
+static char buffer1[2000];
+static char buffer2[2000];
+static char buffer_item[100];
+static bool muda_buffer = false;
+static int adc_voltage = 0; // Variável para armazenar o valor lido do tacogerador
+static int adc_raw = 0; // Variável para armazenar o valor lido do tacogerador e enviar para dashboard
+static int adc_voltage1 = 0; // Variável para armazenar o valor lido do tacogerador
+static int adc_raw1 = 0; // Variável para armazenar o valor lido do tacogerador e enviar para dashboard
+static int t_timer = 0; // Contador de tempo
+static float u0 = 45.0;
+static float ur = 0; // Sinal de duty real
+static float u = 0;
+static char r[10] = {0}; // Referência
 
-static const char *TAG = "MQTT_MOTOR_TACOGERADOR";
+esp_mqtt_client_handle_t mqtt_client = NULL;
+adc_oneshot_unit_handle_t adc_handle;
+adc_cali_handle_t adc_cali_handle = NULL;
+
+static const char *TAG = "PLANTA_MOTOR_TACOGERADOR";
 
 static void log_error_if_nonzero(const char *message, int error_code) {
     if (error_code != 0) {
@@ -91,8 +113,8 @@ void wifi_connection() {
     esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL);
     wifi_config_t wifi_configuration = {
         .sta = {
-            .ssid = "WIFI_SSID",
-            .password = "WIFI_PASSWORD",
+            .ssid = SSID,
+            .password = PASS,
         }
     };
     esp_wifi_set_mode(WIFI_MODE_STA);
@@ -105,12 +127,12 @@ void wifi_connection() {
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data) {
     ESP_LOGD(TAG, "Event dispatched from event loop base=%s, event_id=%" PRIi32 "", base, event_id);
     esp_mqtt_event_handle_t event = event_data;
-    client = event->client;
+    mqtt_client = event->client;
 
     switch (event->event_id) {
         case MQTT_EVENT_CONNECTED:
             ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
-            esp_mqtt_client_subscribe(client, "planta/tacogerador/referencia", 0);
+            esp_mqtt_client_subscribe(mqtt_client, "planta/tacogerador/referencia", 0);
             break;
         case MQTT_EVENT_DISCONNECTED:
             ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
@@ -149,120 +171,126 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
 // Função para inicializar MQTT
 static void mqtt_app_start(void) {
-    esp_mqtt_client_config_t mqtt_cfg = {
-        .broker.address.uri = "mqtt://BROKER_IP:1883/mqtt",
+    esp_mqtt_client_config_t mqtt_config = {
+        .broker.address.uri = BROKER_URI,
         .credentials.client_id	= "ESP32-Planta-de-Controle",
     };
-    client = esp_mqtt_client_init(&mqtt_cfg);
-    esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, client);
-    esp_mqtt_client_start(client);
+    mqtt_client = esp_mqtt_client_init(&mqtt_config);
+    esp_mqtt_client_register_event(mqtt_client, ESP_EVENT_ANY_ID, mqtt_event_handler, mqtt_client);
+    esp_mqtt_client_start(mqtt_client);
 }
 
 // Função para configurar o PWM
 static void pwm_config(void) {
-    ledc_timer_config_t timer = {
-        .speed_mode = LEDC_LOW_SPEED_MODE,
-        .duty_resolution = LEDC_TIMER_13_BIT,
-        .timer_num = LEDC_TIMER_0,
-        .freq_hz = LEDC_FREQ,
+    ledc_timer_config_t ledc_timer = {
+        .speed_mode = LEDC_MODE,
+        .timer_num = LEDC_TIMER,
+        .duty_resolution = LEDC_DUTY_RES,
+        .freq_hz = LEDC_FREQUENCY,
         .clk_cfg = LEDC_AUTO_CLK
     };
+    ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
 
-    ledc_timer_config(&timer);
-
-    ledc_channel_config_t channel_LEDC = {
-        .gpio_num = LEDC_GPIO,
-        .speed_mode = LEDC_LOW_SPEED_MODE,
-        .channel = LEDC_CHANNEL_0,
-        .timer_sel = LEDC_TIMER_0,
+    ledc_channel_config_t ledc_channel = {
+        .speed_mode = LEDC_MODE,
+        .channel = LEDC_CHANNEL,
+        .timer_sel = LEDC_TIMER,
+        .intr_type = LEDC_INTR_DISABLE,
+        .gpio_num = LEDC_OUTPUT_IO,
         .duty = 0,
         .hpoint = 0
     };
-
-    ledc_channel_config(&channel_LEDC);
+    ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
 }
 
 // Função para configurar o ADC (Conversor Analógico-Digital)
 static void adc_config(void) {
     // Configura a unidade do ADC
-    adc_oneshot_unit_init_cfg_t init_cfg = {
+    adc_oneshot_unit_init_cfg_t adc_unit = {
         .unit_id = ADC_UNIT,
         .ulp_mode = ADC_ULP_MODE_DISABLE,
     };
-    adc_oneshot_new_unit(&init_cfg, &handle);
+    adc_oneshot_new_unit(&adc_unit, &adc_handle);
 
     // Configura o canal do ADC
-    adc_oneshot_chan_cfg_t ch_cfg = {
-        .bitwidth = ADC_BITWIDTH_12,
-        .atten = ADC_ATTEN_DB_12,
+    adc_oneshot_chan_cfg_t adc_channel = {
+        .bitwidth = ADC_BITWIDTH_DEFAULT,
+        .atten = ADC_ATTEN,
     };
-    adc_oneshot_config_channel(handle, ADC_CHANNEL, &ch_cfg);
+    adc_oneshot_config_channel(adc_handle, ADC_CHANNEL, &adc_channel);
 }
 
-// Converte a saída do ADC para tensão
-int converte_tensao_adc(int Dout, int Vmax, int Dmax) {
-    return (Dout * Vmax / Dmax);
+// Função para calibração do ADC.
+static void adc_calibration(void) {
+    adc_cali_curve_fitting_config_t cali_config = {
+        .unit_id = ADC_UNIT,
+        .chan = ADC_CHANNEL,
+        .atten = ADC_ATTEN,
+        .bitwidth = ADC_BITWIDTH_DEFAULT,
+    };
+    ESP_ERROR_CHECK(adc_cali_create_scheme_curve_fitting(&cali_config, &adc_cali_handle));
 }
 
 // Função para comunicação com a IHM
 void enviar_dados() {
-    while(1) {
+    while (1) {
+        ESP_ERROR_CHECK(adc_oneshot_read(adc_handle, ADC_CHANNEL, &adc_raw)); // Leitura do ADC (dado bruto)
+        ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc_cali_handle, adc_raw, &adc_voltage)); // Calibração do dado obtido pelo ADC (em mV)
         t_timer += T_AMOSTRAGEM;
-
-        // Formata a mensagem JSON
-        char json_message[128];
-        snprintf(json_message, sizeof(json_message), 
-            "{\"t\":%d,\"y\":%d,\"u\":%.2f,\"e\":%2f},",
-            t_timer, converte_tensao_adc(adc_voltage, 3100, 4095), u, e[1]);
         
         // Verifica se o buffer encheu, envia os dados e intercala com o outro buffer
-        if (contador >= 50) {
+        if (buffer_count >= 50) {
             if (!muda_buffer) {
-                esp_mqtt_client_publish(client, "planta/tacogerador/voltage", buffer1, 0, 1, 0); // Faz o envio do buffer1 por MQTT
+                esp_mqtt_client_publish(mqtt_client, "planta/tacogerador/voltage", buffer1, 0, 1, 0); // Faz o envio do buffer1 por MQTT
                 memset(buffer1, 0, sizeof(buffer1));
             } else {
-                esp_mqtt_client_publish(client, "planta/tacogerador/voltage", buffer2, 0, 1, 0); // Faz o envio do buffer2 por MQTT
+                esp_mqtt_client_publish(mqtt_client, "planta/tacogerador/voltage", buffer2, 0, 1, 0); // Faz o envio do buffer2 por MQTT
                 memset(buffer2, 0, sizeof(buffer2));
             }
             muda_buffer = !muda_buffer;
-            contador = 0;
+            buffer_count = 0;
         }
 
         // Preenche os buffers
-        if (!muda_buffer) {
-            strcat(buffer1, json_message);
+        if (buffer_count == 0) {
+            sprintf(buffer_item, "%d,%d,%.2f,%.2f", t_timer, adc_voltage, u, e[1]);
         } else {
-            strcat(buffer2, json_message);
+            sprintf(buffer_item, ",%d,%d,%.2f,%.2f", t_timer, adc_voltage, u, e[1]);
         }
-        contador++;
+
+        if (!muda_buffer) {
+            strcat(buffer1, buffer_item);
+        } else {
+            strcat(buffer2, buffer_item);
+        }
+        buffer_count++;
         
         vTaskDelay(T_AMOSTRAGEM / portTICK_PERIOD_MS); // Delay de T ms
     }
 }
 
 void app_main(void) {
+    ESP_LOGI("APP", "Iniciando a Planta de Controle: Motor-Tacogerador");
     nvs_flash_init();
     wifi_connection(); // Configura o wifi
     mqtt_app_start(); // Configura o MQTT
     pwm_config(); // Configura o PWM para o motor
     adc_config(); // Configura o ADC para o tacogerador
+    adc_calibration(); // Calibração do ADC.
 
     snprintf(r, sizeof(r), "%d", 1550); // Inicializa a referência com 1550 mV
-
-    // Gera o PWM no GPIO
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, (float) (u0/100) * 8191.0);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
     
     // Repassando a tarefa de comunicação com a IHM para o outro núcleo
-    xTaskCreatePinnedToCore(enviar_dados, "communication", 2048, NULL, 1, NULL, PRO_CPU_NUM);
+    xTaskCreatePinnedToCore(enviar_dados, "communication", 4096, NULL, 1, NULL, PRO_CPU_NUM);
 
     while (1) {
-        adc_oneshot_read(handle, ADC_CHANNEL, &adc_voltage); // Leitura do ADC (Tacogerador)
+        ESP_ERROR_CHECK(adc_oneshot_read(adc_handle, ADC_CHANNEL, &adc_raw1)); // Leitura do ADC (dado bruto)
+        ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc_cali_handle, adc_raw, &adc_voltage1)); // Calibração do dado obtido pelo ADC (em mV)
 
         e[0] = e[1];
         uc[0] = uc[1];
 
-        e[1] = atoi(r) - converte_tensao_adc(adc_voltage, 3100, 4095); // Cálculo do erro
+        e[1] = atoi(r) - adc_voltage1; // Cálculo do erro
 
         uc[1] = uc[0] - 0.5833 * (1 - 2.0449) * e[1] - 0.5833 * e[0]; // Controlador Síntese Direta
         // uc[1] = uc[0] + 0.6095 * e[1] + (0.0262 - 0.6095) * e[0]; // Controlador Modelo Interno
@@ -280,9 +308,12 @@ void app_main(void) {
         }
 
         // Gera o PWM no GPIO
-        ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, (float) u/100 * 8191.0);
-        ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+        ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, (float) u/100 * pow(2, LEDC_DUTY_RES));
+        ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
 
-        vTaskDelay(10 / portTICK_PERIOD_MS); // Delay de 10 ms
+        vTaskDelay(T_AMOSTRAGEM / portTICK_PERIOD_MS); // Delay de T ms
     }
+
+    ESP_ERROR_CHECK(adc_oneshot_del_unit(adc_handle));
+    ESP_ERROR_CHECK(adc_cali_delete_scheme_curve_fitting(adc_cali_handle));
 }
